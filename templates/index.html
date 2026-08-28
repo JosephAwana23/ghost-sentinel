@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ghost-Sentinel Mobile</title>
+    
+    <!-- Markdown Parser -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Code Syntax Highlighter (Tokyo Night Theme) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/tokyo-night-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+
+    <style>
+        :root {
+            --bg-color: #0b0f19;
+            --card-bg: #111827;
+            --accent: #10b981;
+            --text-main: #f3f4f6;
+            --text-dim: #9ca3af;
+            --border: #1f2937;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            margin: 0;
+            padding: 16px;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-block-end: 1px solid var(--border);
+            padding-bottom: 12px;
+            margin-bottom: 20px;
+        }
+
+        .header h1 {
+            font-size: 1.25rem;
+            margin: 0;
+            color: var(--accent);
+        }
+
+        .card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+
+        .card-title {
+            font-size: 0.875rem;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 8px;
+        }
+
+        .metric {
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+
+        .btn {
+            background-color: var(--accent);
+            color: #000;
+            font-weight: 700;
+            border: none;
+            width: 100%;
+            padding: 14px;
+            border-radius: 8px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .btn:active {
+            opacity: 0.8;
+        }
+
+        /* Updated Console CSS to support Markdown formatting cleanly */
+        .output-console {
+            background: #000;
+            color: #10b981;
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            overflow-x: auto;
+            line-height: 1.6;
+        }
+
+        .output-console pre {
+            background: #111827; /* Darker background for code blocks */
+            padding: 12px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            overflow-x: auto;
+        }
+        
+        .output-console code {
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>Ghost-Sentinel</h1>
+        <span style="color: var(--accent);">● ONLINE</span>
+    </div>
+
+    <div class="card">
+        <div class="card-title">System Status</div>
+        <div class="metric" id="uptime">Loading...</div>
+        <div style="color: var(--text-dim); font-size: 0.85rem; margin-top: 4px;" id="proc">Processes: --</div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">Target Configuration</div>
+        <input type="text" id="target" placeholder="192.168.1.1 or subnet" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border); background: #000; color: var(--accent); margin-bottom: 12px; box-sizing: border-box;">
+    </div>
+
+    <div class="card">
+        <div class="card-title">Recon & Scanning</div>
+        <button class="btn" onclick="triggerScan()" style="margin-bottom: 8px;">Audit Open Ports</button>
+        <button class="btn" onclick="triggerDiscover()" style="margin-bottom: 8px; background-color: #3b82f6;">Network Discovery</button>
+        <button class="btn" onclick="triggerPortScan()" style="margin-bottom: 8px; background-color: #f59e0b;">Port Scan</button>
+        <button class="btn" onclick="triggerServices()" style="margin-bottom: 8px; background-color: #8b5cf6;">Service Enum</button>
+    </div>
+
+    <div class="card">
+        <div class="card-title">OSINT & DNS</div>
+        <button class="btn" onclick="triggerDns()" style="margin-bottom: 8px; background-color: #ec4899;">DNS Lookup</button>
+        <button class="btn" onclick="triggerWhois()" style="margin-bottom: 8px; background-color: #06b6d4;">WHOIS Lookup</button>
+        <button class="btn" onclick="triggerTraceroute()" style="margin-bottom: 8px; background-color: #14b8a6;">Traceroute</button>
+    </div>
+
+    <div class="card">
+        <div class="card-title">Web & Certificate Scanning</div>
+        <button class="btn" onclick="triggerWeb()" style="margin-bottom: 8px; background-color: #f97316;">Web Scan (Nikto)</button>
+        <button class="btn" onclick="triggerSSL()" style="margin-bottom: 8px; background-color: #eab308;">SSL Cert Scan</button>
+    </div>
+
+    <div class="card">
+        <div class="card-title">Network Enumeration</div>
+        <button class="btn" onclick="triggerSMB()" style="background-color: #a855f7;">SMB Enum (Windows)</button>
+    </div>
+
+    <div class="card">
+    <div class="card-title">Active MITRE ATT&CK Vectors</div>
+    <div id="mitre-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-top: 8px;">
+        <div style="background: #1f2937; padding: 8px; border-radius: 6px; font-size: 0.7rem; text-align: center;">
+            <div style="color: var(--accent); font-weight: bold;">T1046</div>
+            <div style="color: var(--text-dim);">Network Service</div>
+        </div>
+        <div style="background: #1f2937; padding: 8px; border-radius: 6px; font-size: 0.7rem; text-align: center;">
+            <div style="color: #f59e0b; font-weight: bold;">T1021</div>
+            <div style="color: var(--text-dim);">Remote Services</div>
+        </div>
+        <div style="background: #1f2937; padding: 8px; border-radius: 6px; font-size: 0.7rem; text-align: center;">
+            <div style="color: #ef4444; font-weight: bold;">T1562</div>
+            <div style="color: var(--text-dim);">Impair Defenses</div>
+        </div>
+        <div style="background: #1f2937; padding: 8px; border-radius: 6px; font-size: 0.7rem; text-align: center;">
+            <div style="color: var(--text-dim); font-weight: bold;">T1078</div>
+            <div style="color: var(--text-dim);">Valid Accounts</div>
+        </div>
+    </div>
+</div>
+
+
+    <div class="card">
+        <div class="card-title">Advanced Defense (Aegis)</div>
+        <button class="btn" onclick="triggerFIM()" style="background-color: #ef4444;">Run File Integrity Monitor (FIM)</button>
+    </div>
+
+    <div class="card">
+        <div class="card-title">Audit Log History (SQLite)</div>
+        <button class="btn" onclick="loadAuditLogs()" style="background-color: #6366f1; margin-bottom: 12px; color: #fff;">Refresh Audit Table</button>
+        <div style="overflow-x: auto;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.75rem; color: var(--text-dim);">
+                <thead>
+                    <tr style="border-bottom: 1px solid var(--border); text-align: left;">
+                        <th style="padding: 6px;">Time</th>
+                        <th style="padding: 6px;">Module</th>
+                        <th style="padding: 6px;">Target</th>
+                        <th style="padding: 6px;">Score</th>
+                    </tr>
+                </thead>
+                <tbody id="log-tbody">
+                    <tr><td colspan="4" style="padding: 6px;">Click refresh to load logs...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card" style="border: 1px solid #6366f1;">
+        <div class="card-title" style="color: #818cf8;">CyberBuddy War Room (Log RAG)</div>
+        <input type="text" id="warroom-query" placeholder="e.g. Summarize today's highest risks..." style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border); background: #000; color: #818cf8; margin-bottom: 8px; box-sizing: border-box;">
+        <button class="btn" onclick="queryWarRoom()" style="background-color: #6366f1; color: #fff; margin-bottom: 8px;">Ask CyberBuddy</button>
+        <div id="warroom-output" class="output-console" style="color: #818cf8;">War room ready for natural language log queries...</div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">Console Output</div>
+        <!-- Changed to a div to support Markdown HTML injection -->
+        <div id="output" class="output-console">System ready for commands...</div>
+    </div>
+
+    <script>
+        // Initialize Markdown Syntax Highlighting
+        marked.setOptions({
+            highlight: function(code, lang) {
+                const language = hljs.getLanguage(lang) ? lang : 'plaintext';
+                return hljs.highlight(code, { language }).value;
+            }
+        });
+
+        async function fetchTelemetry() {
+            try {
+                const res = await fetch('/api/telemetry');
+                const data = await res.json();
+                document.getElementById('uptime').innerText = data.uptime;
+                document.getElementById('proc').innerText = `Active Processes: ${data.active_processes}`;
+            } catch (e) {
+                console.error("Telemetry error:", e);
+            }
+        }
+
+        function getTarget() {
+            return document.getElementById('target').value || 'localhost';
+        }
+
+        async function triggerScan() {
+            const out = document.getElementById('output');
+            out.innerHTML = "Running socket audit...";
+            try {
+                const res = await fetch('/api/scan', { method: 'POST' });
+                const data = await res.json();
+                out.innerHTML = marked.parse(`**[${data.time}] Results:**\n\n${data.result}`);
+            } catch (e) {
+                out.innerHTML = "Error executing scan.";
+            }
+        }
+
+        async function triggerDiscover() {
+            const out = document.getElementById('output');
+            const target = getTarget();
+            out.innerHTML = `Running network discovery on ${target}...`;
+            try {
+                const res = await fetch('/api/discover', { 
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target })
+                });
+                const data = await res.json();
+                out.innerHTML = marked.parse(`**[${data.time}] Discovery Results:**\n\n${data.result}`);
+            } catch (e) {
+                out.innerHTML = "Error: Discovery failed. Ensure nmap is installed.";
+            }
+        }
+
+        async function triggerPortScan() {
+            const out = document.getElementById('output');
+            const target = getTarget();
+            out.innerHTML = `Scanning ports on ${target}...`;
+            try {
+                const res = await fetch('/api/ports', { 
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target })
+                });
+                const data = await res.json();
+                out.innerHTML = marked.parse(`**[${data.time}] Port Scan Results:**\n\n${data.result}`);
+            } catch (e) {
+                out.innerHTML = "Error: Port scan failed.";
+            }
+        }
+
+        async function triggerServices() {
+            const out = document.getElementById('output');
+            const target = getTarget();
+            out.innerHTML = `Enumerating services on ${target}...`;
+            try {
+                const res = await fetch('/api/services', { 
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target })
+                });
+                const data = await res.json();
+                out.innerHTML = marked.parse(`**[${data.time}] Service Enumeration:**\n\n${data.result}`);
+            } catch (e) {
+                out.innerHTML = "Error: Service enumeration failed.";
+            }
+        }
+
+        async function triggerDns() {
+            const out = document.getElementById('output');
+            const target = getTarget();
+            out.innerHTML = `Resolving DNS for ${target}...`;
+            try {
+                const res = await fetch('/api/dns', { 
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target })
+                });
+                const data = await res.json();
+                out.innerHTML = marked.parse(`**[${data.time}] DNS Results:**\n\n${data.result}`);
+            } catch (e) {
+                out.innerHTML = "Error: DNS lookup failed.";
+            }
+        }
+
+        async function triggerWhois() {
+            const out = document.getElementById('output');
+            const target = getTarget();
+            out.innerHTML = `Looking up WHOIS for ${target}...`;
+            try {
+                const res = await fetch('/api/whois', { 
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target })
+                });
+                const data = await res.json();
+                out.innerHTML = marked.parse(`**[${data.time}] WHOIS Results:**\n\n${data.result}`);
+            } catch (e) {
+                out.innerHTML = "Error: WHOIS lookup failed.";
+            }
+        }
+
+        async function triggerSSL() {
+            const out = document.getElementById('output');
+            const target = getTarget();
+            out.innerHTML = `Scanning SSL/TLS on ${target}...`;
+            try {
+                const res = await fetch('/api/ssl', { 
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target })
+                });
+                const data = await res.json();
+                out.innerHTML = marked.parse(`**[${data.time}] SSL Scan Results:**\n\n${data.result}`);
+            } catch (e) {
+                out.innerHTML = "Error: SSL scan failed.";
+            }
+        }
+
+        async function triggerSMB() {
+            const out = document.getElementById('output');
+            const target = getTarget();
+            out.innerHTML = `Enumerating SMB shares on ${target}...`;
+            try {
+                const res = await fetch('/api/smb', { 
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target })
+                });
+                const data = await res.json();
+                out.innerHTML = marked.parse(`**[${data.time}] SMB Enumeration:**\n\n${data.result}`);
+            } catch (e) {
+                out.innerHTML = "Error: SMB enumeration failed (enum4linux required).";
+            }
+        }
+
+        async function triggerWeb() {
+            const out = document.getElementById('output');
+            const target = getTarget();
+            out.innerHTML = `Scanning web vulnerabilities on ${target}...`;
+            try {
+                const res = await fetch('/api/web', { 
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target })
+                });
+                const data = await res.json();
+                out.innerHTML = marked.parse(`**[${data.time}] Web Scan Results:**\n\n${data.result}`);
+            } catch (e) {
+                out.innerHTML = "Error: Web scan failed (nikto required).";
+            }
+        }
+
+        async function triggerTraceroute() {
+            const out = document.getElementById('output');
+            const target = getTarget();
+            out.innerHTML = `Tracing route to ${target}...`;
+            try {
+                const res = await fetch('/api/traceroute', { 
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target })
+                });
+                const data = await res.json();
+                out.innerHTML = marked.parse(`**[${data.time}] Traceroute Results:**\n\n${data.result}`);
+            } catch (e) {
+                out.innerHTML = "Error: Traceroute failed.";
+            }
+        }
+
+        async function triggerFIM() {
+            const out = document.getElementById('output');
+            out.innerHTML = "Running local File Integrity Monitor (FIM) hash walk...";
+            try {
+                const res = await fetch('/api/fim', { method: 'POST' });
+                const data = await res.json();
+                if (data.result) {
+                    out.innerHTML = marked.parse(`**[${data.time}] FIM Integrity Results:**\n\n${data.result}`);
+                } else {
+                    out.innerHTML = marked.parse(`**[Error]** FIM Failed: ${data.message}`);
+                }
+            } catch (e) {
+                out.innerHTML = "Error: FIM request failed.";
+            }
+        }
+
+
+        async function loadAuditLogs() {
+            const tbody = document.getElementById('log-tbody');
+            tbody.innerHTML = `<tr><td colspan="4" style="padding: 6px;">Loading logs...</td></tr>`;
+            try {
+                const res = await fetch('/api/logs');
+                const data = await res.json();
+                if (data.logs && data.logs.length > 0) {
+                    tbody.innerHTML = data.logs.map(log => `
+                        <tr style="border-bottom: 1px solid var(--border);">
+                            <td style="padding: 6px; white-space: nowrap;">${log.timestamp || '--'}</td>
+                            <td style="padding: 6px; color: var(--accent);">${log.module || '--'}</td>
+                            <td style="padding: 6px;">${log.target || '--'}</td>
+                            <td style="padding: 6px; font-weight: bold; color: ${log.risk_score > 50 ? '#ef4444' : '#10b981'};">${log.risk_score ?? 0}</td>
+                        </tr>
+                    `).join('');
+                } else {
+                    tbody.innerHTML = `<tr><td colspan="4" style="padding: 6px;">No audit records found in SQLite.</td></tr>`;
+                }
+            } catch (e) {
+                tbody.innerHTML = `<tr><td colspan="4" style="padding: 6px; color: #ef4444;">Failed to load logs.</td></tr>`;
+            }
+        }
+
+        async function queryWarRoom() {
+            const queryInput = document.getElementById('warroom-query').value;
+            const out = document.getElementById('warroom-output');
+            if (!queryInput) return;
+            out.innerHTML = "CyberBuddy is analyzing audit records...";
+            try {
+                const res = await fetch('/api/warroom', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: queryInput })
+                });
+                const data = await res.json();
+                out.innerHTML = marked.parse(data.answer || "No response received.");
+            } catch (e) {
+                out.innerHTML = "Error querying CyberBuddy War Room.";
+            }
+        }
+
+        // Auto-load audit table on startup
+        loadAuditLogs();
+
+
+        fetchTelemetry();
+        setInterval(fetchTelemetry, 5000);
+    </script>
+</body>
+</html>
