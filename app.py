@@ -42,7 +42,7 @@ celery.conf.beat_schedule = {
 # Initialize AI & Threat Intel Clients
 gemini_api_key = os.environ.get("GEMINI_API_KEY")
 copilot_api_key = os.environ.get("COPILOT_API_KEY")
-ABUSEIPDB_API_KEY = os.environ.get("ABUSEIPDB_API_KEY")
+abuseipdb_api_key = os.environ.get("ABUSEIPDB_API_KEY")
 
 gemini_client = genai.Client(api_key=gemini_api_key) if gemini_api_key else None
 copilot_client = OpenAI(api_key=copilot_api_key) if copilot_api_key else None
@@ -86,8 +86,13 @@ def sanitize_target(target):
     return clean if clean else "127.0.0.1"
 
 
-def check_ip_reputation(target_ip):
+def check_ip_reputation(target_str):
+    """Extracts a clean public IPv4 address from input strings like 'dns.google (8.8.8.8)'."""
     try:
+        # Pull out raw IP strings using regex from input like target or scan output
+        ip_match = re.search(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', target_str)
+        target_ip = ip_match.group(0) if ip_match else target_str.strip()
+        
         clean_ip = target_ip.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0]
         ip_obj = ipaddress.ip_address(clean_ip)
         if ip_obj.is_private or ip_obj.is_loopback:
@@ -259,7 +264,10 @@ def run_cmd(command_list, stdin_input=""):
 def execute_pipeline(module, target, command_list, stdin_input=""):
     current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     output = run_cmd(command_list, stdin_input=stdin_input)
+    
+    # Ensure target is passed here so AbuseIPDB gets evaluated!
     ai_analysis = evaluate_threat_level(module, output, target=target)
+    
     match = re.search(r'\[SCORE:\s*(\d+)\]', ai_analysis)
     score = int(match.group(1)) if match else 0
     
