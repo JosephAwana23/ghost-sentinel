@@ -14,6 +14,7 @@ from flask_socketio import SocketIO
 from google import genai
 from openai import OpenAI
 import requests
+from celery.schedules import crontab
 
 # Detect Host Operating System
 IS_WINDOWS = platform.system().lower() == "windows"
@@ -28,6 +29,13 @@ celery = Celery(app.name, broker=redis_url, backend=redis_url)
 celery.conf.update(result_backend=redis_url, broker_url=redis_url)
 
 start_time = time.time()
+
+celery.conf.beat_schedule = {
+    'sentinel-automated-fim-scan': {
+        'task': 'app.automated_background_fim',
+        'schedule': crontab(minute='*/15'), # Runs every 15 minutes
+    },
+}
 
 # Initialize AI & Threat Intel Clients
 gemini_api_key = os.environ.get("GEMINI_API_KEY")
@@ -271,6 +279,37 @@ def run_fim_scan(directory=None):
                 integrity_report[fullpath] = calculate_sha256(fullpath)
     return integrity_report
 
+
+
+@celery.task(name='app.automated_background_fim')
+def automated_background_fim():
+    """Runs silently in the background via Celery Beat."""
+    base_dir = os.environ.get('SCAN_DIR', os.getcwd())
+    integrity_report = {}
+    
+    for root, _, files in os.walk(base_dir):
+        for file in files:
+            if file.endswith(('.py', '.sh', '.bat', '.ps1', '.conf', '.json')):
+                fullpath = os.path.join(root, file)
+                integrity_report[fullpath] = calculate_sha256(fullpath)
+    
+    output_summary = (
+        f"\n[AUTOSCAN] File Integrity Monitor Complete. OS: {platform.system()}.\n"
+        f"Tracked {len(integrity_report)} critical scripts in {base_dir}.\n"
+    )
+    
+    # Run through the Aegis threat evaluation
+    ai_analysis = evaluate_threat_level("fim_autoscan", output_summary, target=base_dir)
+    match = re.search(r'\[SCORE:\s*(\d+)\]', ai_analysis)
+    score = int(match.group(1)) if match else 0
+    
+    current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # Log to database and fire SOAR webhook silently
+    log_audit(current_time, "fim_autoscan", base_dir, ai_analysis, score)
+    dispatch_soar_alert("fim_autoscan", base_dir, score, ai_analysis)
+    
+    return f"Autoscan complete. Score: {score}"
 
 @app.route('/')
 def index():
