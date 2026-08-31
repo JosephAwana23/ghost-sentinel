@@ -1,6 +1,6 @@
-from flask_socketio import SocketIO
 import datetime
 import hashlib
+import ipaddress
 import os
 import platform
 import re
@@ -9,25 +9,30 @@ import sqlite3
 import subprocess
 import time
 from celery import Celery
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, Response
+from flask_socketio import SocketIO
 from google import genai
 from openai import OpenAI
+import requests
 
 # Detect Host Operating System
 IS_WINDOWS = platform.system().lower() == "windows"
 
-# Initialize Flask and Celery
+# Initialize Flask and SocketIO
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*")
+
+# Initialize Celery
 redis_url = os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379/0' if IS_WINDOWS else 'redis://redis:6379/0')
 celery = Celery(app.name, broker=redis_url, backend=redis_url)
 celery.conf.update(result_backend=redis_url, broker_url=redis_url)
 
 start_time = time.time()
 
-# Initialize AI Clients
+# Initialize AI & Threat Intel Clients
 gemini_api_key = os.environ.get("GEMINI_API_KEY")
 copilot_api_key = os.environ.get("COPILOT_API_KEY")
+ABUSEIPDB_API_KEY = os.environ.get("ABUSEIPDB_API_KEY")
 
 gemini_client = genai.Client(api_key=gemini_api_key) if gemini_api_key else None
 copilot_client = OpenAI(api_key=copilot_api_key) if copilot_api_key else None
@@ -71,11 +76,45 @@ def sanitize_target(target):
     return clean if clean else "127.0.0.1"
 
 
-def evaluate_threat_level(module_name, output_text):
+def check_ip_reputation(target_ip):
+    try:
+        clean_ip = target_ip.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0]
+        ip_obj = ipaddress.ip_address(clean_ip)
+        if ip_obj.is_private or ip_obj.is_loopback:
+            return f"[Threat Intel] Target '{target_ip}' is a Private/Loopback RFC-1918 address. No external threat history."
+    except ValueError:
+        return ""
+
+    if not ABUSEIPDB_API_KEY:
+        return "[Threat Intel] ABUSEIPDB_API_KEY not configured. Skipping external reputation lookup."
+
+    try:
+        url = 'https://api.abuseipdb.com/api/v2/check'
+        params = {'ipAddress': clean_ip, 'maxAgeInDays': '90'}
+        headers = {'Accept': 'application/json', 'Key': ABUSEIPDB_API_KEY}
+        
+        resp = requests.get(url, headers=headers, params=params, timeout=4)
+        if resp.status_code == 200:
+            data = resp.json().get('data', {})
+            score = data.get('abuseConfidenceScore', 0)
+            reports = data.get('totalReports', 0)
+            country = data.get('countryCode', 'Unknown')
+            usage = data.get('usageType', 'Unknown')
+            return f"[Threat Intel] Abuse Score: {score}% | Reports: {reports} | Country: {country} | Type: {usage}"
+    except Exception as e:
+        return f"[Threat Intel Error: {str(e)}]"
+    
+    return ""
+
+
+def evaluate_threat_level(module_name, output_text, target=""):
+    intel_context = check_ip_reputation(target) if target else ""
+    enriched_output = f"{intel_context}\n\n{output_text}" if intel_context else output_text
+
     ghost_prompt = (
         f"Provide a threat assessment for the following scan output. "
         f"You are GHOST, an elite Red Team offensive security specialist. "
-        f"Analyze this raw output from module '{module_name}':\n\n{output_text}\n\n"
+        f"Analyze this raw output from module '{module_name}':\n\n{enriched_output}\n\n"
         "Provide your analysis in this exact format:\n"
         "[SCORE: <0-100>]\n"
         "MITRE ATT&CK: [List relevant technique IDs like T1046, T1021]\n"
@@ -84,7 +123,7 @@ def evaluate_threat_level(module_name, output_text):
 
     aegis_prompt = (
         f"You are AEGIS, a Tier-3 Blue Team Security Operations defender. "
-        f"Analyze this raw output from module '{module_name}':\n\n{output_text}\n\n"
+        f"Analyze this raw output from module '{module_name}':\n\n{enriched_output}\n\n"
         "Provide your analysis in this exact format:\n"
         "[SCORE: <0-100>]\n"
         "DEFENSE POSTURE: <Telemetry analysis and blind spots>\n"
@@ -121,10 +160,8 @@ def evaluate_threat_level(module_name, output_text):
         valid_models = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.0-flash']
         for model_name in valid_models:
             try:
-                # NEW: Initialize a chat session first, then send the message
                 chat = gemini_client.chats.create(model=model_name)
                 gemini_resp = chat.send_message(aegis_prompt)
-
                 aegis_result = gemini_resp.text
                 match = re.search(r'\[SCORE:\s*(\d+)\]', aegis_result)
                 if match:
@@ -157,7 +194,6 @@ def dispatch_soar_alert(module, target, score, analysis):
                    f"```yaml\n{analysis[:400]}...\n```"
     }
     try:
-        import requests
         requests.post(webhook_url, json=payload, timeout=5)
     except Exception as e:
         print(f"Webhook dispatch failed: {e}")
@@ -177,10 +213,9 @@ def calculate_sha256(filepath):
 def run_cmd(command_list, stdin_input=""):
     executable = command_list[0]
     if not shutil.which(executable):
-        return f"Tool execution error: '{executable}' is not installed."
+        return f"Tool execution error: '{executable}' is not installed or not in system PATH on this host ({platform.system()})."
 
-    # Broadcast to the frontend that a command is starting
-    socketio.emit('console_update', {'data': f"\n[+] Starting Task: {' '.join(command_list)}\n"})
+    socketio.emit('console_update', {'data': f"\n[+] Executing: {' '.join(command_list)}\n"})
     
     try:
         process = subprocess.Popen(
@@ -197,7 +232,6 @@ def run_cmd(command_list, stdin_input=""):
             process.stdin.write(stdin_input)
             process.stdin.close()
             
-        # Stream the output line-by-line to the frontend console live!
         for line in iter(process.stdout.readline, ''):
             socketio.emit('console_update', {'data': line})
             output.append(line)
@@ -211,10 +245,11 @@ def run_cmd(command_list, stdin_input=""):
         socketio.emit('console_update', {'data': f"\n[-] {err}\n"})
         return err
 
+
 def execute_pipeline(module, target, command_list, stdin_input=""):
     current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     output = run_cmd(command_list, stdin_input=stdin_input)
-    ai_analysis = evaluate_threat_level(module, output)
+    ai_analysis = evaluate_threat_level(module, output, target=target)
     match = re.search(r'\[SCORE:\s*(\d+)\]', ai_analysis)
     score = int(match.group(1)) if match else 0
     
@@ -312,7 +347,6 @@ def whois_lookup():
 def traceroute():
     data = request.get_json() or {}
     target = sanitize_target(data.get('target', '8.8.8.8'))
-    # Use tracert on Windows, traceroute on Linux
     cmd = ["tracert", "-h", "10", target] if IS_WINDOWS else ["traceroute", "-m", "10", target]
     return execute_pipeline("traceroute", target, cmd)
 
@@ -361,8 +395,6 @@ def trigger_fim():
                     fullpath = os.path.join(root, file)
                     file_hash = calculate_sha256(fullpath)
                     integrity_report[fullpath] = file_hash
-                    
-                    # STREAM LIVE TO FRONTEND
                     socketio.emit('console_update', {'data': f"[HASHED] {file} -> {file_hash[:16]}...\n"})
         
         output_summary = (
@@ -372,7 +404,7 @@ def trigger_fim():
         
         socketio.emit('console_update', {'data': "\n[*] Sending hash baseline to Aegis for analysis...\n"})
         
-        ai_analysis = evaluate_threat_level("fim", output_summary)
+        ai_analysis = evaluate_threat_level("fim", output_summary, target=base_dir)
         match = re.search(r'\[SCORE:\s*(\d+)\]', ai_analysis)
         score = int(match.group(1)) if match else 0
         current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -386,12 +418,12 @@ def trigger_fim():
         socketio.emit('console_update', {'data': f"\n[-] {err_msg}\n"})
         return jsonify({"status": "error", "message": err_msg}), 500
 
+
 @app.route('/api/compliance', methods=['POST'])
 def run_compliance():
-    socketio.emit('console_update', {'data': "\n[*] Initializing CJIS/CIS Baseline Compliance Audit...\n"})
+    socketio.emit('console_update', {'data': "\n[*] Initializing CIS/CJIS Baseline Compliance Audit...\n"})
     
     if IS_WINDOWS:
-        # Check Windows Defender, Firewall, and USB Storage Registry Keys
         cmd = [
             "powershell", "-Command", 
             "Get-MpComputerStatus | Select-Object AMServiceEnabled; "
@@ -399,10 +431,43 @@ def run_compliance():
             "Get-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\USBSTOR' -Name Start -ErrorAction SilentlyContinue"
         ]
     else:
-        # Check UFW/iptables, SELinux/AppArmor, and USB kernel modules
         cmd = ["bash", "-c", "ufw status || iptables -L; lsmod | grep usb-storage; sestatus || aa-status"]
         
     return execute_pipeline("compliance", "localhost", cmd)
+
+
+@app.route('/api/rules/export', methods=['GET'])
+def export_sigma_rules():
+    try:
+        with sqlite3.connect('security_audit.db') as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT timestamp, module, target, ai_analysis FROM audit_logs ORDER BY id DESC")
+            rows = cursor.fetchall()
+            
+        sigma_bundle = "# Ghost-Sentinel Generated Sigma Detection Rules Bundle\n"
+        sigma_bundle += f"# Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        sigma_bundle += "# -------------------------------------------------------------\n\n"
+        
+        extracted_count = 0
+        for r in rows:
+            analysis = r['ai_analysis'] or ""
+            yaml_matches = re.findall(r'```yaml(.*?)```', analysis, re.DOTALL)
+            for y in yaml_matches:
+                extracted_count += 1
+                sigma_bundle += f"# Module: {r['module']} | Target: {r['target']} | Date: {r['timestamp']}\n"
+                sigma_bundle += y.strip() + "\n---\n\n"
+                
+        if extracted_count == 0:
+            sigma_bundle += "# No Sigma rules found in current audit database logs."
+
+        return Response(
+            sigma_bundle,
+            mimetype="application/x-yaml",
+            headers={"Content-Disposition": "attachment;filename=ghost_sentinel_sigma_rules.yml"}
+        )
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 @app.route('/api/logs', methods=['GET'])
@@ -448,15 +513,12 @@ def war_room_query():
     )
 
     try:
-        response = gemini_client.models.generate_content(
-            model='gemini-3.6-flash',
-            contents=prompt, 
-        )
+        chat = gemini_client.chats.create(model='gemini-3.6-flash')
+        response = chat.send_message(prompt)
         return jsonify({"status": "success", "answer": response.text})
     except Exception as e:
         return jsonify({"status": "error", "answer": f"War Room AI error: {str(e)}"})
 
 
 if __name__ == '__main__':
-    # Replace app.run() with socketio.run()
     socketio.run(app, host='0.0.0.0', port=5000, allow_unsafe_werkzeug=True)

@@ -10,7 +10,7 @@
     <!-- Code Syntax Highlighter (Tokyo Night Theme) -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/tokyo-night-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-    <!-- Socket.IO for Live Streaming -->
+    <!-- Socket.IO for Real-Time Streaming -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
 
     <style>
@@ -35,7 +35,7 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            border-block-end: 1px solid var(--border);
+            border-bottom: 1px solid var(--border);
             padding-bottom: 12px;
             margin-bottom: 20px;
         }
@@ -92,7 +92,7 @@
             font-size: 0.85rem;
             overflow-x: auto;
             line-height: 1.6;
-            max-height: 400px; /* Added max height for scrolling */
+            max-height: 400px;
             overflow-y: auto;
         }
 
@@ -109,7 +109,8 @@
         }
 
         hr {
-            border-color: var(--border);
+            border: none;
+            border-top: 1px solid var(--border);
             margin: 16px 0;
         }
     </style>
@@ -135,27 +136,27 @@
     <div class="card">
         <div class="card-title">Recon & Scanning</div>
         <button class="btn" onclick="triggerScan()" style="margin-bottom: 8px;">Audit Open Ports</button>
-        <button class="btn" onclick="triggerDiscover()" style="margin-bottom: 8px; background-color: #3b82f6;">Network Discovery</button>
-        <button class="btn" onclick="triggerPortScan()" style="margin-bottom: 8px; background-color: #f59e0b;">Port Scan</button>
-        <button class="btn" onclick="triggerServices()" style="margin-bottom: 8px; background-color: #8b5cf6;">Service Enum</button>
+        <button class="btn" onclick="triggerDiscover()" style="margin-bottom: 8px; background-color: #3b82f6; color: #fff;">Network Discovery</button>
+        <button class="btn" onclick="triggerPortScan()" style="margin-bottom: 8px; background-color: #f59e0b; color: #000;">Port Scan</button>
+        <button class="btn" onclick="triggerServices()" style="margin-bottom: 8px; background-color: #8b5cf6; color: #fff;">Service Enum</button>
     </div>
 
     <div class="card">
         <div class="card-title">OSINT & DNS</div>
-        <button class="btn" onclick="triggerDns()" style="margin-bottom: 8px; background-color: #ec4899;">DNS Lookup</button>
-        <button class="btn" onclick="triggerWhois()" style="margin-bottom: 8px; background-color: #06b6d4;">WHOIS Lookup</button>
-        <button class="btn" onclick="triggerTraceroute()" style="margin-bottom: 8px; background-color: #14b8a6;">Traceroute</button>
+        <button class="btn" onclick="triggerDns()" style="margin-bottom: 8px; background-color: #ec4899; color: #fff;">DNS Lookup</button>
+        <button class="btn" onclick="triggerWhois()" style="margin-bottom: 8px; background-color: #06b6d4; color: #000;">WHOIS Lookup</button>
+        <button class="btn" onclick="triggerTraceroute()" style="margin-bottom: 8px; background-color: #14b8a6; color: #000;">Traceroute</button>
     </div>
 
     <div class="card">
         <div class="card-title">Web & Certificate Scanning</div>
-        <button class="btn" onclick="triggerWeb()" style="margin-bottom: 8px; background-color: #f97316;">Web Scan (Nikto)</button>
-        <button class="btn" onclick="triggerSSL()" style="margin-bottom: 8px; background-color: #eab308;">SSL Cert Scan</button>
+        <button class="btn" onclick="triggerWeb()" style="margin-bottom: 8px; background-color: #f97316; color: #000;">Web Scan (Nikto)</button>
+        <button class="btn" onclick="triggerSSL()" style="margin-bottom: 8px; background-color: #eab308; color: #000;">SSL Cert Scan</button>
     </div>
 
     <div class="card">
         <div class="card-title">Network Enumeration</div>
-        <button class="btn" onclick="triggerSMB()" style="background-color: #a855f7;">SMB Enum (Windows)</button>
+        <button class="btn" onclick="triggerSMB()" style="background-color: #a855f7; color: #fff;">SMB Enum (Windows)</button>
     </div>
 
     <div class="card">
@@ -182,8 +183,9 @@
 
     <div class="card">
         <div class="card-title">Advanced Defense (Aegis)</div>
-        <button class="btn" onclick="triggerFIM()" style="background-color: #ef4444; margin-bottom: 8px;">Run File Integrity Monitor (FIM)</button>
-        <button class="btn" onclick="triggerCompliance()" style="background-color: #3b82f6;">Run CIS/CJIS Compliance Audit</button>
+        <button class="btn" onclick="triggerFIM()" style="background-color: #ef4444; color: #fff; margin-bottom: 8px;">Run File Integrity Monitor (FIM)</button>
+        <button class="btn" onclick="triggerCompliance()" style="background-color: #3b82f6; color: #fff; margin-bottom: 8px;">Run CIS/CJIS Compliance Audit</button>
+        <button class="btn" onclick="exportSigmaRules()" style="background-color: #10b981; color: #000;">Download Sigma Rules (.yml)</button>
     </div>
 
     <div class="card">
@@ -219,11 +221,9 @@
     </div>
 
     <script>
-        // Initialize WebSocket connection
         const socket = io();
         const consoleOut = document.getElementById('output');
 
-        // Listen for live updates and stream to console
         socket.on('console_update', function(msg) {
             if (consoleOut.innerHTML === "System ready for commands...") {
                 consoleOut.innerHTML = "";
@@ -233,7 +233,6 @@
             consoleOut.scrollTop = consoleOut.scrollHeight; 
         });
 
-        // Initialize Markdown Syntax Highlighting
         marked.setOptions({
             highlight: function(code, lang) {
                 const language = hljs.getLanguage(lang) ? lang : 'plaintext';
@@ -263,6 +262,7 @@
                 const data = await res.json();
                 consoleOut.innerHTML += "<hr>" + marked.parse(`**[${data.time}] AI Analysis:**\n\n${data.result}`);
                 consoleOut.scrollTop = consoleOut.scrollHeight;
+                loadAuditLogs();
             } catch (e) {
                 consoleOut.innerHTML += "<br>Error executing scan.";
             }
@@ -280,8 +280,9 @@
                 const data = await res.json();
                 consoleOut.innerHTML += "<hr>" + marked.parse(`**[${data.time}] AI Analysis:**\n\n${data.result}`);
                 consoleOut.scrollTop = consoleOut.scrollHeight;
+                loadAuditLogs();
             } catch (e) {
-                consoleOut.innerHTML += "<br>Error: Discovery failed. Ensure nmap is installed.";
+                consoleOut.innerHTML += "<br>Error: Discovery failed.";
             }
         }
 
@@ -297,6 +298,7 @@
                 const data = await res.json();
                 consoleOut.innerHTML += "<hr>" + marked.parse(`**[${data.time}] AI Analysis:**\n\n${data.result}`);
                 consoleOut.scrollTop = consoleOut.scrollHeight;
+                loadAuditLogs();
             } catch (e) {
                 consoleOut.innerHTML += "<br>Error: Port scan failed.";
             }
@@ -314,6 +316,7 @@
                 const data = await res.json();
                 consoleOut.innerHTML += "<hr>" + marked.parse(`**[${data.time}] AI Analysis:**\n\n${data.result}`);
                 consoleOut.scrollTop = consoleOut.scrollHeight;
+                loadAuditLogs();
             } catch (e) {
                 consoleOut.innerHTML += "<br>Error: Service enumeration failed.";
             }
@@ -331,6 +334,7 @@
                 const data = await res.json();
                 consoleOut.innerHTML += "<hr>" + marked.parse(`**[${data.time}] AI Analysis:**\n\n${data.result}`);
                 consoleOut.scrollTop = consoleOut.scrollHeight;
+                loadAuditLogs();
             } catch (e) {
                 consoleOut.innerHTML += "<br>Error: DNS lookup failed.";
             }
@@ -348,6 +352,7 @@
                 const data = await res.json();
                 consoleOut.innerHTML += "<hr>" + marked.parse(`**[${data.time}] AI Analysis:**\n\n${data.result}`);
                 consoleOut.scrollTop = consoleOut.scrollHeight;
+                loadAuditLogs();
             } catch (e) {
                 consoleOut.innerHTML += "<br>Error: WHOIS lookup failed.";
             }
@@ -365,6 +370,7 @@
                 const data = await res.json();
                 consoleOut.innerHTML += "<hr>" + marked.parse(`**[${data.time}] AI Analysis:**\n\n${data.result}`);
                 consoleOut.scrollTop = consoleOut.scrollHeight;
+                loadAuditLogs();
             } catch (e) {
                 consoleOut.innerHTML += "<br>Error: SSL scan failed.";
             }
@@ -382,6 +388,7 @@
                 const data = await res.json();
                 consoleOut.innerHTML += "<hr>" + marked.parse(`**[${data.time}] AI Analysis:**\n\n${data.result}`);
                 consoleOut.scrollTop = consoleOut.scrollHeight;
+                loadAuditLogs();
             } catch (e) {
                 consoleOut.innerHTML += "<br>Error: SMB enumeration failed.";
             }
@@ -399,6 +406,7 @@
                 const data = await res.json();
                 consoleOut.innerHTML += "<hr>" + marked.parse(`**[${data.time}] AI Analysis:**\n\n${data.result}`);
                 consoleOut.scrollTop = consoleOut.scrollHeight;
+                loadAuditLogs();
             } catch (e) {
                 consoleOut.innerHTML += "<br>Error: Web scan failed.";
             }
@@ -416,6 +424,7 @@
                 const data = await res.json();
                 consoleOut.innerHTML += "<hr>" + marked.parse(`**[${data.time}] AI Analysis:**\n\n${data.result}`);
                 consoleOut.scrollTop = consoleOut.scrollHeight;
+                loadAuditLogs();
             } catch (e) {
                 consoleOut.innerHTML += "<br>Error: Traceroute failed.";
             }
@@ -432,6 +441,7 @@
                     consoleOut.innerHTML += "<hr>" + marked.parse(`**[Error]** FIM Failed: ${data.message}`);
                 }
                 consoleOut.scrollTop = consoleOut.scrollHeight;
+                loadAuditLogs();
             } catch (e) {
                 consoleOut.innerHTML += "<br>Error: FIM request failed.";
             }
@@ -444,14 +454,18 @@
                 const data = await res.json();
                 consoleOut.innerHTML += "<hr>" + marked.parse(`**[${data.time}] Compliance AI Analysis:**\n\n${data.result}`);
                 consoleOut.scrollTop = consoleOut.scrollHeight;
+                loadAuditLogs();
             } catch (e) {
                 consoleOut.innerHTML += "<br>Error: Compliance audit failed.";
             }
         }
 
+        function exportSigmaRules() {
+            window.location.href = '/api/rules/export';
+        }
+
         async function loadAuditLogs() {
             const tbody = document.getElementById('log-tbody');
-            tbody.innerHTML = `<tr><td colspan="4" style="padding: 6px;">Loading logs...</td></tr>`;
             try {
                 const res = await fetch('/api/logs');
                 const data = await res.json();
@@ -490,9 +504,7 @@
             }
         }
 
-        // Auto-load audit table on startup
         loadAuditLogs();
-
         fetchTelemetry();
         setInterval(fetchTelemetry, 5000);
     </script>
