@@ -8,6 +8,8 @@ import shutil
 import sqlite3
 import subprocess
 import time
+import whois
+import socket
 from celery import Celery
 from flask import Flask, jsonify, render_template, request, Response
 from flask_socketio import SocketIO
@@ -165,7 +167,7 @@ def evaluate_threat_level(module_name, output_text, target=""):
             ghost_result = f"Ghost evaluation error: {str(e)}"
 
     if gemini_client:
-        valid_models = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.0-flash']
+        valid_models = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.7-flash']
         for model_name in valid_models:
             try:
                 chat = gemini_client.chats.create(model=model_name)
@@ -350,21 +352,27 @@ def scan():
 def discover():
     data = request.get_json() or {}
     target = sanitize_target(data.get('target', '192.168.1.0/24'))
-    return execute_pipeline("discover", target, ["nmap", "-sn", target])
+    nmap_path = r"C:\Program Files (x86)\Nmap\nmap.exe"
+    cmd = [nmap_path, "-sn", target] if IS_WINDOWS and os.path.exists(nmap_path) else ["nmap", "-sn", target]
+    return execute_pipeline("discover", target, cmd)
 
 
 @app.route('/api/ports', methods=['POST'])
 def ports():
     data = request.get_json() or {}
     target = sanitize_target(data.get('target', 'localhost'))
-    return execute_pipeline("ports", target, ["nmap", "-T4", "-F", target])
+    nmap_path = r"C:\Program Files (x86)\Nmap\nmap.exe"
+    cmd = [nmap_path, "-T4", "-F", target] if IS_WINDOWS and os.path.exists(nmap_path) else ["nmap", "-T4", "-F", target]
+    return execute_pipeline("ports", target, cmd)
 
 
 @app.route('/api/services', methods=['POST'])
 def services():
     data = request.get_json() or {}
     target = sanitize_target(data.get('target', 'localhost'))
-    return execute_pipeline("services", target, ["nmap", "-sV", "-p-", "--max-retries", "1", target])
+    nmap_path = r"C:\Program Files (x86)\Nmap\nmap.exe"
+    cmd = [nmap_path, "-sV", "-p-", "--max-retries", "1", target] if IS_WINDOWS and os.path.exists(nmap_path) else ["nmap", "-sV", "-p-", "--max-retries", "1", target]
+    return execute_pipeline("services", target, cmd)
 
 
 @app.route('/api/dns', methods=['POST'])
@@ -379,7 +387,29 @@ def dns_lookup():
 def whois_lookup():
     data = request.get_json() or {}
     target = sanitize_target(data.get('target', 'example.com'))
-    return execute_pipeline("whois", target, ["whois", target])
+    
+    # Block local lookups immediately to prevent socket hangs
+    if target in ["localhost", "127.0.0.1", "::1"]:
+        output = "WHOIS error: Cannot perform public WHOIS registry query on local loopback target."
+    else:
+        socketio.emit('console_update', {'data': f"\n[*] Querying WHOIS registration for {target}...\n"})
+        try:
+            # Force a strict 5-second socket timeout so it never hangs for 20 mins
+            socket.setdefaulttimeout(5)
+            w = whois.whois(target)
+            output = str(w)
+        except Exception as e:
+            output = f"WHOIS query timeout or error: {str(e)}"
+        
+    ai_analysis = evaluate_threat_level("whois", output, target=target)
+    match = re.search(r'\[SCORE:\s*(\d+)\]', ai_analysis)
+    score = int(match.group(1)) if match else 0
+    current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    log_audit(current_time, "whois", target, ai_analysis, score)
+    dispatch_soar_alert("whois", target, score, ai_analysis)
+    
+    return jsonify({"time": current_time, "result": ai_analysis, "risk_score": score})
 
 
 @app.route('/api/traceroute', methods=['POST'])
