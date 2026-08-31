@@ -1,3 +1,4 @@
+from flask_socketio import SocketIO
 import datetime
 import hashlib
 import os
@@ -17,6 +18,7 @@ IS_WINDOWS = platform.system().lower() == "windows"
 
 # Initialize Flask and Celery
 app = Flask(__name__)
+socketio = SocketIO(app, cors_allowed_origins="*")
 redis_url = os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379/0' if IS_WINDOWS else 'redis://redis:6379/0')
 celery = Celery(app.name, broker=redis_url, backend=redis_url)
 celery.conf.update(result_backend=redis_url, broker_url=redis_url)
@@ -174,26 +176,40 @@ def calculate_sha256(filepath):
 
 def run_cmd(command_list, stdin_input=""):
     executable = command_list[0]
-    # Check if executable exists in PATH
     if not shutil.which(executable):
-        return f"Tool execution error: '{executable}' is not installed or not in system PATH on this host ({platform.system()})."
+        return f"Tool execution error: '{executable}' is not installed."
 
+    # Broadcast to the frontend that a command is starting
+    socketio.emit('console_update', {'data': f"\n[+] Starting Task: {' '.join(command_list)}\n"})
+    
     try:
-        result = subprocess.run(
+        process = subprocess.Popen(
             command_list,
-            input=stdin_input,
-            capture_output=True,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
-            timeout=15,
             shell=False
         )
-        output = result.stdout + result.stderr
-        return output if output.strip() else "Command executed with no output."
-    except subprocess.TimeoutExpired:
-        return "Error: Command timed out after 15 seconds."
+        
+        output = []
+        if stdin_input:
+            process.stdin.write(stdin_input)
+            process.stdin.close()
+            
+        # Stream the output line-by-line to the frontend console live!
+        for line in iter(process.stdout.readline, ''):
+            socketio.emit('console_update', {'data': line})
+            output.append(line)
+            
+        process.stdout.close()
+        process.wait(timeout=15)
+        
+        return "".join(output) if output else "Command executed with no output."
     except Exception as e:
-        return f"Execution error: {str(e)}"
-
+        err = f"Execution error: {str(e)}"
+        socketio.emit('console_update', {'data': f"\n[-] {err}\n"})
+        return err
 
 def execute_pipeline(module, target, command_list, stdin_input=""):
     current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -334,20 +350,27 @@ def smb_enum():
 
 @app.route('/api/fim', methods=['POST'])
 def trigger_fim():
+    socketio.emit('console_update', {'data': "\n[*] Initializing File Integrity Hash Walk...\n"})
     try:
         base_dir = os.environ.get('SCAN_DIR', os.getcwd())
         integrity_report = {}
+        
         for root, _, files in os.walk(base_dir):
             for file in files:
-                if file.endswith(('.py', '.sh', '.bat', '.ps1', '.conf', '.json')):
+                if file.endswith(('.py', '.sh', '.bat', '.ps1', '.conf', '.json', '.html')):
                     fullpath = os.path.join(root, file)
-                    integrity_report[fullpath] = calculate_sha256(fullpath)
+                    file_hash = calculate_sha256(fullpath)
+                    integrity_report[fullpath] = file_hash
+                    
+                    # STREAM LIVE TO FRONTEND
+                    socketio.emit('console_update', {'data': f"[HASHED] {file} -> {file_hash[:16]}...\n"})
         
         output_summary = (
-            f"File Integrity Monitor (FIM) Complete. Host OS: {platform.system()}.\n"
-            f"Tracked {len(integrity_report)} critical scripts in {base_dir}:\n" +
-            "\n".join([f"- {path}: `{digest[:16]}...`" for path, digest in list(integrity_report.items())[:15]])
+            f"\nFile Integrity Monitor (FIM) Complete. Host OS: {platform.system()}.\n"
+            f"Tracked {len(integrity_report)} critical scripts in {base_dir}.\n"
         )
+        
+        socketio.emit('console_update', {'data': "\n[*] Sending hash baseline to Aegis for analysis...\n"})
         
         ai_analysis = evaluate_threat_level("fim", output_summary)
         match = re.search(r'\[SCORE:\s*(\d+)\]', ai_analysis)
@@ -359,7 +382,27 @@ def trigger_fim():
         
         return jsonify({"time": current_time, "result": ai_analysis, "risk_score": score})
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+        err_msg = f"FIM Error: {str(e)}"
+        socketio.emit('console_update', {'data': f"\n[-] {err_msg}\n"})
+        return jsonify({"status": "error", "message": err_msg}), 500
+
+@app.route('/api/compliance', methods=['POST'])
+def run_compliance():
+    socketio.emit('console_update', {'data': "\n[*] Initializing CJIS/CIS Baseline Compliance Audit...\n"})
+    
+    if IS_WINDOWS:
+        # Check Windows Defender, Firewall, and USB Storage Registry Keys
+        cmd = [
+            "powershell", "-Command", 
+            "Get-MpComputerStatus | Select-Object AMServiceEnabled; "
+            "Get-NetFirewallProfile | Select-Object Name, Enabled; "
+            "Get-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\USBSTOR' -Name Start -ErrorAction SilentlyContinue"
+        ]
+    else:
+        # Check UFW/iptables, SELinux/AppArmor, and USB kernel modules
+        cmd = ["bash", "-c", "ufw status || iptables -L; lsmod | grep usb-storage; sestatus || aa-status"]
+        
+    return execute_pipeline("compliance", "localhost", cmd)
 
 
 @app.route('/api/logs', methods=['GET'])
@@ -415,4 +458,5 @@ def war_room_query():
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    # Replace app.run() with socketio.run()
+    socketio.run(app, host='0.0.0.0', port=5000, allow_unsafe_werkzeug=True)

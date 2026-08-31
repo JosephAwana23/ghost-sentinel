@@ -10,6 +10,8 @@
     <!-- Code Syntax Highlighter (Tokyo Night Theme) -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/tokyo-night-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <!-- Socket.IO for Live Streaming -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
 
     <style>
         :root {
@@ -82,7 +84,6 @@
             opacity: 0.8;
         }
 
-        /* Updated Console CSS to support Markdown formatting cleanly */
         .output-console {
             background: #000;
             color: #10b981;
@@ -91,10 +92,12 @@
             font-size: 0.85rem;
             overflow-x: auto;
             line-height: 1.6;
+            max-height: 400px; /* Added max height for scrolling */
+            overflow-y: auto;
         }
 
         .output-console pre {
-            background: #111827; /* Darker background for code blocks */
+            background: #111827;
             padding: 12px;
             border-radius: 6px;
             border: 1px solid var(--border);
@@ -103,6 +106,11 @@
         
         .output-console code {
             font-family: monospace;
+        }
+
+        hr {
+            border-color: var(--border);
+            margin: 16px 0;
         }
     </style>
 </head>
@@ -151,31 +159,31 @@
     </div>
 
     <div class="card">
-    <div class="card-title">Active MITRE ATT&CK Vectors</div>
-    <div id="mitre-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-top: 8px;">
-        <div style="background: #1f2937; padding: 8px; border-radius: 6px; font-size: 0.7rem; text-align: center;">
-            <div style="color: var(--accent); font-weight: bold;">T1046</div>
-            <div style="color: var(--text-dim);">Network Service</div>
-        </div>
-        <div style="background: #1f2937; padding: 8px; border-radius: 6px; font-size: 0.7rem; text-align: center;">
-            <div style="color: #f59e0b; font-weight: bold;">T1021</div>
-            <div style="color: var(--text-dim);">Remote Services</div>
-        </div>
-        <div style="background: #1f2937; padding: 8px; border-radius: 6px; font-size: 0.7rem; text-align: center;">
-            <div style="color: #ef4444; font-weight: bold;">T1562</div>
-            <div style="color: var(--text-dim);">Impair Defenses</div>
-        </div>
-        <div style="background: #1f2937; padding: 8px; border-radius: 6px; font-size: 0.7rem; text-align: center;">
-            <div style="color: var(--text-dim); font-weight: bold;">T1078</div>
-            <div style="color: var(--text-dim);">Valid Accounts</div>
+        <div class="card-title">Active MITRE ATT&CK Vectors</div>
+        <div id="mitre-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-top: 8px;">
+            <div style="background: #1f2937; padding: 8px; border-radius: 6px; font-size: 0.7rem; text-align: center;">
+                <div style="color: var(--accent); font-weight: bold;">T1046</div>
+                <div style="color: var(--text-dim);">Network Service</div>
+            </div>
+            <div style="background: #1f2937; padding: 8px; border-radius: 6px; font-size: 0.7rem; text-align: center;">
+                <div style="color: #f59e0b; font-weight: bold;">T1021</div>
+                <div style="color: var(--text-dim);">Remote Services</div>
+            </div>
+            <div style="background: #1f2937; padding: 8px; border-radius: 6px; font-size: 0.7rem; text-align: center;">
+                <div style="color: #ef4444; font-weight: bold;">T1562</div>
+                <div style="color: var(--text-dim);">Impair Defenses</div>
+            </div>
+            <div style="background: #1f2937; padding: 8px; border-radius: 6px; font-size: 0.7rem; text-align: center;">
+                <div style="color: var(--text-dim); font-weight: bold;">T1078</div>
+                <div style="color: var(--text-dim);">Valid Accounts</div>
+            </div>
         </div>
     </div>
-</div>
-
 
     <div class="card">
         <div class="card-title">Advanced Defense (Aegis)</div>
-        <button class="btn" onclick="triggerFIM()" style="background-color: #ef4444;">Run File Integrity Monitor (FIM)</button>
+        <button class="btn" onclick="triggerFIM()" style="background-color: #ef4444; margin-bottom: 8px;">Run File Integrity Monitor (FIM)</button>
+        <button class="btn" onclick="triggerCompliance()" style="background-color: #3b82f6;">Run CIS/CJIS Compliance Audit</button>
     </div>
 
     <div class="card">
@@ -207,11 +215,24 @@
 
     <div class="card">
         <div class="card-title">Console Output</div>
-        <!-- Changed to a div to support Markdown HTML injection -->
         <div id="output" class="output-console">System ready for commands...</div>
     </div>
 
     <script>
+        // Initialize WebSocket connection
+        const socket = io();
+        const consoleOut = document.getElementById('output');
+
+        // Listen for live updates and stream to console
+        socket.on('console_update', function(msg) {
+            if (consoleOut.innerHTML === "System ready for commands...") {
+                consoleOut.innerHTML = "";
+            }
+            let formattedData = msg.data.replace(/\n/g, '<br>');
+            consoleOut.innerHTML += formattedData;
+            consoleOut.scrollTop = consoleOut.scrollHeight; 
+        });
+
         // Initialize Markdown Syntax Highlighting
         marked.setOptions({
             highlight: function(code, lang) {
@@ -225,7 +246,7 @@
                 const res = await fetch('/api/telemetry');
                 const data = await res.json();
                 document.getElementById('uptime').innerText = data.uptime;
-                document.getElementById('proc').innerText = `Active Processes: ${data.active_processes}`;
+                document.getElementById('proc').innerText = `Active Processes: ${data.active_processes} | OS: ${data.platform || 'Unknown'}`;
             } catch (e) {
                 console.error("Telemetry error:", e);
             }
@@ -236,21 +257,20 @@
         }
 
         async function triggerScan() {
-            const out = document.getElementById('output');
-            out.innerHTML = "Running socket audit...";
+            consoleOut.innerHTML = "Running socket audit...<br>";
             try {
                 const res = await fetch('/api/scan', { method: 'POST' });
                 const data = await res.json();
-                out.innerHTML = marked.parse(`**[${data.time}] Results:**\n\n${data.result}`);
+                consoleOut.innerHTML += "<hr>" + marked.parse(`**[${data.time}] AI Analysis:**\n\n${data.result}`);
+                consoleOut.scrollTop = consoleOut.scrollHeight;
             } catch (e) {
-                out.innerHTML = "Error executing scan.";
+                consoleOut.innerHTML += "<br>Error executing scan.";
             }
         }
 
         async function triggerDiscover() {
-            const out = document.getElementById('output');
             const target = getTarget();
-            out.innerHTML = `Running network discovery on ${target}...`;
+            consoleOut.innerHTML = `Running network discovery on ${target}...<br>`;
             try {
                 const res = await fetch('/api/discover', { 
                     method: 'POST',
@@ -258,16 +278,16 @@
                     body: JSON.stringify({ target })
                 });
                 const data = await res.json();
-                out.innerHTML = marked.parse(`**[${data.time}] Discovery Results:**\n\n${data.result}`);
+                consoleOut.innerHTML += "<hr>" + marked.parse(`**[${data.time}] AI Analysis:**\n\n${data.result}`);
+                consoleOut.scrollTop = consoleOut.scrollHeight;
             } catch (e) {
-                out.innerHTML = "Error: Discovery failed. Ensure nmap is installed.";
+                consoleOut.innerHTML += "<br>Error: Discovery failed. Ensure nmap is installed.";
             }
         }
 
         async function triggerPortScan() {
-            const out = document.getElementById('output');
             const target = getTarget();
-            out.innerHTML = `Scanning ports on ${target}...`;
+            consoleOut.innerHTML = `Scanning ports on ${target}...<br>`;
             try {
                 const res = await fetch('/api/ports', { 
                     method: 'POST',
@@ -275,16 +295,16 @@
                     body: JSON.stringify({ target })
                 });
                 const data = await res.json();
-                out.innerHTML = marked.parse(`**[${data.time}] Port Scan Results:**\n\n${data.result}`);
+                consoleOut.innerHTML += "<hr>" + marked.parse(`**[${data.time}] AI Analysis:**\n\n${data.result}`);
+                consoleOut.scrollTop = consoleOut.scrollHeight;
             } catch (e) {
-                out.innerHTML = "Error: Port scan failed.";
+                consoleOut.innerHTML += "<br>Error: Port scan failed.";
             }
         }
 
         async function triggerServices() {
-            const out = document.getElementById('output');
             const target = getTarget();
-            out.innerHTML = `Enumerating services on ${target}...`;
+            consoleOut.innerHTML = `Enumerating services on ${target}...<br>`;
             try {
                 const res = await fetch('/api/services', { 
                     method: 'POST',
@@ -292,16 +312,16 @@
                     body: JSON.stringify({ target })
                 });
                 const data = await res.json();
-                out.innerHTML = marked.parse(`**[${data.time}] Service Enumeration:**\n\n${data.result}`);
+                consoleOut.innerHTML += "<hr>" + marked.parse(`**[${data.time}] AI Analysis:**\n\n${data.result}`);
+                consoleOut.scrollTop = consoleOut.scrollHeight;
             } catch (e) {
-                out.innerHTML = "Error: Service enumeration failed.";
+                consoleOut.innerHTML += "<br>Error: Service enumeration failed.";
             }
         }
 
         async function triggerDns() {
-            const out = document.getElementById('output');
             const target = getTarget();
-            out.innerHTML = `Resolving DNS for ${target}...`;
+            consoleOut.innerHTML = `Resolving DNS for ${target}...<br>`;
             try {
                 const res = await fetch('/api/dns', { 
                     method: 'POST',
@@ -309,16 +329,16 @@
                     body: JSON.stringify({ target })
                 });
                 const data = await res.json();
-                out.innerHTML = marked.parse(`**[${data.time}] DNS Results:**\n\n${data.result}`);
+                consoleOut.innerHTML += "<hr>" + marked.parse(`**[${data.time}] AI Analysis:**\n\n${data.result}`);
+                consoleOut.scrollTop = consoleOut.scrollHeight;
             } catch (e) {
-                out.innerHTML = "Error: DNS lookup failed.";
+                consoleOut.innerHTML += "<br>Error: DNS lookup failed.";
             }
         }
 
         async function triggerWhois() {
-            const out = document.getElementById('output');
             const target = getTarget();
-            out.innerHTML = `Looking up WHOIS for ${target}...`;
+            consoleOut.innerHTML = `Looking up WHOIS for ${target}...<br>`;
             try {
                 const res = await fetch('/api/whois', { 
                     method: 'POST',
@@ -326,16 +346,16 @@
                     body: JSON.stringify({ target })
                 });
                 const data = await res.json();
-                out.innerHTML = marked.parse(`**[${data.time}] WHOIS Results:**\n\n${data.result}`);
+                consoleOut.innerHTML += "<hr>" + marked.parse(`**[${data.time}] AI Analysis:**\n\n${data.result}`);
+                consoleOut.scrollTop = consoleOut.scrollHeight;
             } catch (e) {
-                out.innerHTML = "Error: WHOIS lookup failed.";
+                consoleOut.innerHTML += "<br>Error: WHOIS lookup failed.";
             }
         }
 
         async function triggerSSL() {
-            const out = document.getElementById('output');
             const target = getTarget();
-            out.innerHTML = `Scanning SSL/TLS on ${target}...`;
+            consoleOut.innerHTML = `Scanning SSL/TLS on ${target}...<br>`;
             try {
                 const res = await fetch('/api/ssl', { 
                     method: 'POST',
@@ -343,16 +363,16 @@
                     body: JSON.stringify({ target })
                 });
                 const data = await res.json();
-                out.innerHTML = marked.parse(`**[${data.time}] SSL Scan Results:**\n\n${data.result}`);
+                consoleOut.innerHTML += "<hr>" + marked.parse(`**[${data.time}] AI Analysis:**\n\n${data.result}`);
+                consoleOut.scrollTop = consoleOut.scrollHeight;
             } catch (e) {
-                out.innerHTML = "Error: SSL scan failed.";
+                consoleOut.innerHTML += "<br>Error: SSL scan failed.";
             }
         }
 
         async function triggerSMB() {
-            const out = document.getElementById('output');
             const target = getTarget();
-            out.innerHTML = `Enumerating SMB shares on ${target}...`;
+            consoleOut.innerHTML = `Enumerating SMB shares on ${target}...<br>`;
             try {
                 const res = await fetch('/api/smb', { 
                     method: 'POST',
@@ -360,16 +380,16 @@
                     body: JSON.stringify({ target })
                 });
                 const data = await res.json();
-                out.innerHTML = marked.parse(`**[${data.time}] SMB Enumeration:**\n\n${data.result}`);
+                consoleOut.innerHTML += "<hr>" + marked.parse(`**[${data.time}] AI Analysis:**\n\n${data.result}`);
+                consoleOut.scrollTop = consoleOut.scrollHeight;
             } catch (e) {
-                out.innerHTML = "Error: SMB enumeration failed (enum4linux required).";
+                consoleOut.innerHTML += "<br>Error: SMB enumeration failed.";
             }
         }
 
         async function triggerWeb() {
-            const out = document.getElementById('output');
             const target = getTarget();
-            out.innerHTML = `Scanning web vulnerabilities on ${target}...`;
+            consoleOut.innerHTML = `Scanning web vulnerabilities on ${target}...<br>`;
             try {
                 const res = await fetch('/api/web', { 
                     method: 'POST',
@@ -377,16 +397,16 @@
                     body: JSON.stringify({ target })
                 });
                 const data = await res.json();
-                out.innerHTML = marked.parse(`**[${data.time}] Web Scan Results:**\n\n${data.result}`);
+                consoleOut.innerHTML += "<hr>" + marked.parse(`**[${data.time}] AI Analysis:**\n\n${data.result}`);
+                consoleOut.scrollTop = consoleOut.scrollHeight;
             } catch (e) {
-                out.innerHTML = "Error: Web scan failed (nikto required).";
+                consoleOut.innerHTML += "<br>Error: Web scan failed.";
             }
         }
 
         async function triggerTraceroute() {
-            const out = document.getElementById('output');
             const target = getTarget();
-            out.innerHTML = `Tracing route to ${target}...`;
+            consoleOut.innerHTML = `Tracing route to ${target}...<br>`;
             try {
                 const res = await fetch('/api/traceroute', { 
                     method: 'POST',
@@ -394,28 +414,40 @@
                     body: JSON.stringify({ target })
                 });
                 const data = await res.json();
-                out.innerHTML = marked.parse(`**[${data.time}] Traceroute Results:**\n\n${data.result}`);
+                consoleOut.innerHTML += "<hr>" + marked.parse(`**[${data.time}] AI Analysis:**\n\n${data.result}`);
+                consoleOut.scrollTop = consoleOut.scrollHeight;
             } catch (e) {
-                out.innerHTML = "Error: Traceroute failed.";
+                consoleOut.innerHTML += "<br>Error: Traceroute failed.";
             }
         }
 
         async function triggerFIM() {
-            const out = document.getElementById('output');
-            out.innerHTML = "Running local File Integrity Monitor (FIM) hash walk...";
+            consoleOut.innerHTML = "Running local File Integrity Monitor (FIM) hash walk...<br>";
             try {
                 const res = await fetch('/api/fim', { method: 'POST' });
                 const data = await res.json();
                 if (data.result) {
-                    out.innerHTML = marked.parse(`**[${data.time}] FIM Integrity Results:**\n\n${data.result}`);
+                    consoleOut.innerHTML += "<hr>" + marked.parse(`**[${data.time}] FIM AI Analysis:**\n\n${data.result}`);
                 } else {
-                    out.innerHTML = marked.parse(`**[Error]** FIM Failed: ${data.message}`);
+                    consoleOut.innerHTML += "<hr>" + marked.parse(`**[Error]** FIM Failed: ${data.message}`);
                 }
+                consoleOut.scrollTop = consoleOut.scrollHeight;
             } catch (e) {
-                out.innerHTML = "Error: FIM request failed.";
+                consoleOut.innerHTML += "<br>Error: FIM request failed.";
             }
         }
 
+        async function triggerCompliance() {
+            consoleOut.innerHTML = "Initializing CIS/CJIS Compliance Audit...<br>";
+            try {
+                const res = await fetch('/api/compliance', { method: 'POST' });
+                const data = await res.json();
+                consoleOut.innerHTML += "<hr>" + marked.parse(`**[${data.time}] Compliance AI Analysis:**\n\n${data.result}`);
+                consoleOut.scrollTop = consoleOut.scrollHeight;
+            } catch (e) {
+                consoleOut.innerHTML += "<br>Error: Compliance audit failed.";
+            }
+        }
 
         async function loadAuditLogs() {
             const tbody = document.getElementById('log-tbody');
@@ -460,7 +492,6 @@
 
         // Auto-load audit table on startup
         loadAuditLogs();
-
 
         fetchTelemetry();
         setInterval(fetchTelemetry, 5000);
