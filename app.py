@@ -121,10 +121,10 @@ def evaluate_threat_level(module_name, output_text):
         valid_models = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.0-flash']
         for model_name in valid_models:
             try:
-                gemini_resp = gemini_client.models.generate_content(
-                    model=model_name,
-                    contents=aegis_prompt,
-                )
+                # NEW: Initialize a chat session first, then send the message
+                chat = gemini_client.chats.create(model=model_name)
+                gemini_resp = chat.send_message(aegis_prompt)
+
                 aegis_result = gemini_resp.text
                 match = re.search(r'\[SCORE:\s*(\d+)\]', aegis_result)
                 if match:
